@@ -1,0 +1,66 @@
+'CR350 Program til at læse MJK 7060/7070 Tryktransmitter via Modbus
+'Baseret på KELLER Series 30/40 kommunikationsprotokol v3.0
+'--------------------------------------------------------------------
+
+'Offentlige variabler til at gemme de færdige værdier
+Public Tryk_bar As Float
+Public Temp_C As Float
+
+'Interne variabler til at holde rå data fra Modbus-kaldene
+'Begge værdier er 32-bit floats, så de kræver et array med plads til 2 registre (2 x 16-bit).
+Dim Raw_Data(2) As Long
+Dim Modbus_Result As Long 'Holder status for kommunikationsforsøget
+
+'Definer en datatabel til at logge resultaterne
+DataTable(MJK_Data, True, -1)
+  DataInterval(0, 10, Sec, 10) 'Log data hvert 10. sekund
+  Sample(1, Tryk_bar, FP2)
+  Sample(1, Temp_C, FP2)
+EndTable
+
+'Hovedprogram
+BeginProg
+  'Konfigurer seriel port (her antages COM1) til at matche transmitterens standardindstillinger.
+  'Format: Baud, Protocol, Framing (Parity, Data, Stop), TX-Delay, Buffer, Mode
+  'Framing=0 betyder: No parity, 8 data bits, 1 stop bit.
+  SerialOpen(Com1, 9600, 0, 0, 10000)
+
+  'Hovedløkke, der kører hvert 10. sekund
+  Scan(10, Sec, 0, 0)
+
+    '--- Læs Tryk (P1) ---
+    'Læser 2 Holding Registers fra adresse 2 fra slave 1 med funktionskode 3.
+    'ModbusMaster(Result, ComPort, Baud, SlaveAddr, Function, StartAddr, NumRegs, DestVar, Tries, TimeOut, Options)
+    ModbusMaster(Modbus_Result, Com1, 9600, 1, 3, 2, 2, Raw_Data(1), 1, 1000, 0)
+
+    'Tjek om læsningen var en succes (Resultat = 0)
+    If Modbus_Result = 0 Then
+      'Konverter de to 16-bit registre (Long) til én 32-bit Float.
+      'Byte-rækkefølgen for Modbus floats er ofte omvendt af, hvad CRBasic forventer.
+      'Prøv først med LongToFP32. Hvis det giver mærkelige værdier, brug den anden linje.
+      Tryk_bar = LongToFP32(Raw_Data, 1)
+      'Tryk_bar = LongToFP32(Raw_Data, 0) 'Alternativ byte-rækkefølge (swapped)
+    Else
+      'Hvis læsningen fejler, sæt værdien til NaN (Not a Number)
+      Tryk_bar = NAN
+    EndIf
+
+    '--- Læs Temperatur (TOB1) ---
+    'Læser 2 Holding Registers fra adresse 8 fra slave 1 med funktionskode 3.
+    ModbusMaster(Modbus_Result, Com1, 9600, 1, 3, 8, 2, Raw_Data(1), 1, 1000, 0)
+
+    'Tjek om læsningen var en succes
+    If Modbus_Result = 0 Then
+      'Konverter de to registre til en Float.
+      Temp_C = LongToFP32(Raw_Data, 1)
+      'Temp_C = LongToFP32(Raw_Data, 0) 'Alternativ byte-rækkefølge (swapped)
+    Else
+      'Hvis læsningen fejler, sæt værdien til NaN
+      Temp_C = NAN
+    EndIf
+
+    'Kald datatabellen for at logge de nye værdier
+    CallTable MJK_Data
+
+  NextScan
+EndProg
