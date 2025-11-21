@@ -6,7 +6,7 @@
 '--- Konstanter ---
 'VIGTIGT FOR CR350:
 'Brug Com1 eller Com2 (RS-485 klemmerne).
-Const ComPort = Com1     
+Const ComPort = Com2     
 Const BaudRate = 9600    'Jf. manual afsnit 3.1 [cite: 427, 432]
 Const ModbusAddr = 250   'Transparent adresse
 
