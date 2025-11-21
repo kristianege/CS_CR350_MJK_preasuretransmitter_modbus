@@ -1,0 +1,63 @@
+'CR350 Datalogger Program
+'Device: Keller / MJK Series 30/40 - SAFE MODE
+'Instruction: ModbusClient
+'Added: Internal Panel Temperature logging
+
+'--- Konstanter ---
+'VIGTIGT FOR CR350:
+'Brug Com1 eller Com2 (RS-485 klemmerne).
+Const ComPort = Com1     
+Const BaudRate = 9600    'Jf. manual afsnit 3.1 [cite: 427, 432]
+Const ModbusAddr = 250   'Transparent adresse
+
+'--- Variabler ---
+Public PTemp_C            'Variabel til loggerens temperatur
+Public ResultP1 As Long
+Public ResultT As Long
+Public P1_Pressure As Float
+Public TOB1_Temp As Float
+
+'--- Enheder ---
+Units PTemp_C = DegC
+Units P1_Pressure = Bar
+Units TOB1_Temp = DegC
+
+'--- Datatabel ---
+DataTable(Table1, True, -1)
+    DataInterval(0, 10, Sec, 10)
+    
+    'Her gemmer vi loggerens egen temperatur
+    Sample(1, PTemp_C, Float)
+    
+    'Her gemmer vi data fra Modbus
+    Sample(1, P1_Pressure, Float)
+    Sample(1, TOB1_Temp, Float)
+    
+    'Gemmer resultatkoderne (0 = OK, alt andet = fejl)
+    Sample(1, ResultP1, FP2) 
+EndTable
+
+'--- Main Program ---
+BeginProg
+    '1. Opsætning af seriel port (8N1)
+    SerialOpen(ComPort, BaudRate, 0, 0, 100)
+
+    Scan(10, Sec, 3, 0)
+    
+        '--- A. Mål loggerens temperatur ---
+        'Dette virker altid, selv uden sensor tilsluttet.
+        '_50Hz fjerner støj fra elnettet (standard i DK/Europa).
+        PanelTemp(PTemp_C, _50Hz)
+
+        '--- B. Hent Tryk (P1) via Modbus ---
+        'Start Register: 2 (0x0002), Længde: 2
+        ModbusClient(ResultP1, ComPort, BaudRate, ModbusAddr, 3, P1_Pressure, 2, 2, 3, 100, 2)
+
+        '--- C. Hent Temperatur (TOB1) via Modbus ---
+        'Start Register: 8 (0x0008), Længde: 2
+        ModbusClient(ResultT, ComPort, BaudRate, ModbusAddr, 3, TOB1_Temp, 8, 2, 3, 100, 2)
+        
+        'Gem data i tabellen
+        CallTable Table1
+    NextScan
+EndProg
