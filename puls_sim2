@@ -1,0 +1,114 @@
+'CRBasic Program: KROHNE Puls + MJK Analog + Døgnlog
+'Logger: Campbell Scientific CR350
+
+'--- Variabler ---
+Public Pulses As Float
+Public Total_Pulses_Acc As Long
+Public Total_M3_Acc As Double, Flow_L_s As Double, Flow_M3_Inc As Float
+Public MJK_mA As Float, WaterLevel_m As Float ' Variabelnavn rettet til mA
+
+'--- Konstanter ---
+Const Scan_Sec = 10
+Const M3_Per_Pulse = 0.100  ' 1 puls = 100 Liter (0.1 m3)
+Const L_Per_Pulse = 100
+
+'--- Vandstand Kalibrering (Tilpas til sensor!) ---
+Const Lvl_Min = 0.0  
+Const Lvl_Max = 3.0
+' ÆNDRING: Dividerer med 16 (mA span: 20-4)
+Const Lvl_Mult = (Lvl_Max - Lvl_Min) / 16 
+' ÆNDRING: Trækker 4 (mA) fra i offsettet
+Const Lvl_Offset = Lvl_Min - (4 * Lvl_Mult)
+
+'--- Tabel: Hvert 10. Minut ---
+    DataTable(StationLog, True, -1)
+        DataInterval(0, 10, Min, 10)
+        Sample(1, WaterLevel_m, FP2)
+        Sample(1, Total_M3_Acc, FP2)      ' Målerstand
+        Average(1, Flow_L_s, FP2, False)  ' Gennemsnitsflow
+        Totalize(1, Pulses, Long, False)
+    EndTable
+
+'--- Tabel: Hvert Døgn (Midnat) ---
+
+    DataTable(DailyLog, True, -1)
+        DataInterval(0, 24, Hr, 10)
+        Totalize(1, Flow_M3_Inc, FP2, False) ' Døgnforbrug m3
+        Average(1, Flow_L_s, FP2, False)     ' Døgn-gennemsnit
+        Maximum(1, Flow_L_s, FP2, False, False)
+        Average(1, WaterLevel_m, FP2, False)
+        Minimum(1, WaterLevel_m, FP2, False, False)
+        Maximum(1, WaterLevel_m, FP2, False, False)
+    EndTable
+
+BeginProg
+    Scan(Scan_Sec, Sec, 0, 0)
+        ' 1. Mål Vandstand
+        SW12(1,1)
+        Delay(0, 50, mSec)
+        
+        ' ÆNDRING: CurrentSE(Dest, Reps, Range, SEChan, MeasOff, SettlingTime, fN1, Mult, Offset)
+        ' Range: mv2500 (til 20mA * 140 ohm = 2800mV, men mv2500 er standarden for high range)
+        ' SEChan: 1 (Bruger SE1 / 1H terminalen)
+        ' fN1: 50 Hz støjfilter
+        ' Mult: 1.0 (Outputtet er allerede i mA ifølge dokumentationen)
+        CurrentSE(MJK_mA, 1, mv2500, 1, True, 0, 50, 1.0, 0.0)
+        
+        WaterLevel_m = (MJK_mA * Lvl_Mult) + Lvl_Offset
+        If WaterLevel_m < 0 Then WaterLevel_m = 0
+        
+        'Simuler pulser fra port C1 (Kan nu bruges igen da MJK er på SE1), fjernes ved drift
+        
+        ' --- SIMULERING AF FLOW ---
+                ' Vi ønsker at sende 50 pulser i løbet af dette scan.
+                ' (Ved 100 L/puls svarer det til 5000 Liter på 10 sek = 500 L/s)
+                Dim i
+                For i = 1 To 50
+                    ' 1. Lav én puls på C1
+                    ' PulsePort(Port, Delay_i_mikrosekunder)
+                    ' 50000 us = 50 ms (En god tydelig puls-bredde)
+                    PulsePort(C1,35000)
+                    
+                    ' 2. Vent lidt før næste puls (Pause mellem pulserne)
+                    ' Hvis vi ikke pauser, "smelter" pulserne sammen til én lang streg.
+                    ' 50 ms pause sikrer en pæn firkant-kurve.
+                    Delay(0, 50, mSec)
+                Next i
+        
+                ' --- DIN NORMALE MÅLING -2-
+                ' Nu tæller vi pulserne på indgangen (P1), som C1 er forbundet til
+                'PulseCount(Pulses, 1, P_SW, , 0, 1.0, 0)
+        
+        
+
+        ' 2. Mål Flow (Puls)
+        PulseCount(Pulses, 1,P_SW, 2, 0, 1.0, 0) ' Config 2 = Switch Closure
+        Flow_M3_Inc = Pulses * M3_Per_Pulse
+        Total_Pulses_Acc = Total_Pulses_Acc + Pulses
+        Total_M3_Acc = Total_M3_Acc + Flow_M3_Inc
+        
+        If Pulses > 0 Then Flow_L_s = (Pulses * L_Per_Pulse) / Scan_Sec Else Flow_L_s = 0
+
+        CallTable StationLog
+        CallTable DailyLog
+    NextScan
+EndProg
+
+'HARDWARE TILSLUTNING (WIRING)
+'KROHNE IFC 100 / 070 (PULS)
+  'Terminal D (Puls +): -> CR350 P_SW (Pulse Input 1)
+  'Terminal D- (Puls -): -> CR350 G (Ground)
+  'Opsætning på Måler:
+      'Menu C2.x (Output D) -> Pulse
+       'Value p. Pulse = 0.100 ($m^3$) eller 100 (Liter)
+       'Pulse Width = 100 ms
+
+'Puls simulering 
+  'C1 -> P_SW
+
+'MJK Expert 7060 (Analog Vandstand - Current Loop)
+  'Bruger 4-20mA signal.
+    'Rød ledning (+): -> CR350 SW12 (Switched 12V)
+    'Brun ledning (-): -> CR350 1H (SE1) (OBS: Ændret fra C1 til 1H pga. CurrentSE)
+    'Sort ledning (Skærm): -> CR350 G
+    'Modstand: INGEN (CR350 bruger intern modstand på SE1/SE2)
